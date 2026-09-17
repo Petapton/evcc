@@ -1,6 +1,7 @@
 package tariff
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -133,4 +134,31 @@ func TestEmbedDecodeChargesZones(t *testing.T) {
 	assert.InDelta(t, 0.05, cc.ChargesZones_[0].Charges, 1e-9)
 	assert.Equal(t, "Jan-Mar", cc.ChargesZones_[0].Months)
 	assert.Len(t, cc.chargesZones, 2)
+}
+
+func TestTotalPriceFormulaMemoryStable(t *testing.T) {
+	ts := time.Date(2026, 1, 15, 11, 0, 0, 0, time.Local)
+	e := embed{
+		Charges: 0.10,
+		Tax:     0.19,
+		Formula: "(price + charges) * (1 + tax)",
+	}
+	require.NoError(t, e.init())
+
+	sample := func() uint64 {
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		return ms.HeapAlloc
+	}
+
+	before := int64(sample())
+	for i := 0; i < 10_000; i++ {
+		e.totalPrice(0.20, ts)
+	}
+	after := int64(sample())
+	runtime.KeepAlive(&e)
+
+	// Interpreter grows ~4.5KB per parsed statement; 10k calls would add ~45MB
+	assert.Less(t, after-before, int64(8<<20))  // 8MB
 }
